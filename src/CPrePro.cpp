@@ -1,204 +1,127 @@
+#include <CPrePro.h>
 #include <CExpr.h>
 #include <CFile.h>
 #include <CStrUtil.h>
 #include <cstring>
 
-typedef std::vector<std::string> VariableList;
+#define CPP_SUPPORT 1
 
-struct Context {
-  bool active;
-  bool processed;
-  bool processing;
-};
-
-struct Define {
-  std::string  name;
-  VariableList variables;
-  std::string  value;
-};
-
-typedef std::vector<Context *>     ContextStack;
-typedef std::list<Define *>        DefineList;
-typedef std::list<DefineList>      DefineListList;
-typedef std::vector<std::string>   FileList;
-typedef std::vector<std::string>   DirList;
-typedef std::vector<std::string>   ArgList;
-typedef std::vector<std::string *> LineList;
-
-struct ReplaceDefineData {
-  ReplaceDefineData() { }
-
-  DefineList     used_defines;
-  DefineListList used_defines_list;
-  uint           in_replace_defines { 0 };
-  LineList       lines1;
-  std::string    identifier;
-};
-
-static void        initialize
-                    ();
-static void        process_args
-                    (int argc, char **argv);
-static uint        process_option
-                    (const std::string &option, const std::string &arg);
-static void        add_define_option
-                    (const std::string &define);
-static void        add_include_option
-                    (const std::string &define);
-static void        process_arg
-                    (const std::string &arg);
-static void        process_files
-                    ();
-static void        process_file
-                    (const std::string &file);
-static void        process_line
-                    (const std::string &line);
-static void        process_command
-                    (const std::string &command, const std::string &data);
-static void        process_if_command
-                    (const std::string &data);
-static void        process_ifdef_command
-                    (const std::string &data);
-static void        process_ifndef_command
-                    (const std::string &data);
-static void        process_else_command
-                    (const std::string &data);
-static void        process_elif_command
-                    (const std::string &data);
-static void        process_endif_command
-                    (const std::string &data);
-static void        process_define_command
-                    (const std::string &data);
-static void        process_undef_command
-                    (const std::string &data);
-static void        process_include_command
-                    (const std::string &data);
-static void        process_error_command
-                    (const std::string &data);
-static int         process_expression
-                    (const std::string &expression);
-static void        output_line
-                    (const std::string &line);
-static std::string replace_trigraphs
-                    (const std::string &line);
-static std::string remove_comments
-                    (const std::string &line, bool preprocessor_line);
-static std::string replace_defines
-                    (const std::string &line, bool preprocessor_line);
-static std::string replace_defines
-                    (const std::string &tline, bool preprocessor_line, ReplaceDefineData &data);
-static std::string replace_hash_hash
-                    (const std::string &line);
-static void        add_file
-                    (const std::string &file);
-static void        add_define
-                    (const std::string &name, const VariableList &variables,
-                     const std::string &value);
-static void        remove_define
-                    (const std::string &name);
-static Define     *get_define
-                    (const std::string &name);
-static void        add_include_dir
-                    (const std::string &dir);
-static std::string get_include_file
-                    (const std::string &file);
-static void        start_context
-                    (bool processing);
-static bool        end_context
-                    ();
-static void        terminate
-                    ();
-static CExprValuePtr defined_proc
-                      (const CExprValuePtr *values, uint num_values);
-static FileList       files;
-static DefineList     defines;
-static DirList        include_dirs;
-static Context       *context        = NULL;
-static ContextStack   context_stack;
-static bool           no_blank_lines = false;
-static bool           echo_input     = false;
-static bool           debug          = false;
-static std::string    current_file   = "None";
-static uint           current_line   = 0;
-static bool           in_comment     = false;
-static CExpr         *expr           = nullptr;
-
-static const char trigraph_chars1[] = "=/\'()!<>-";
-static const char trigraph_chars2[] = "#\\^[]|{}~";
+#define XSTR(s) STR(s)
+#define STR(s) #s
 
 class DefinedFunction : public CExprFunctionObj {
  public:
-  CExprValuePtr operator()(CExpr *, const CExprValueArray &values) {
-    return defined_proc(&values[0], values.size());
+  DefinedFunction(CPrePro *prepro) :
+   prepro_(prepro) {
   }
+
+  CExprValuePtr operator()(CExpr *, const CExprValueArray &values) {
+    return prepro_->defined_proc(&values[0], values.size());
+  }
+
+ private:
+  CPrePro *prepro_ { nullptr };
 };
 
 extern int
 main(int argc, char **argv)
 {
-  initialize();
+  CPrePro prepro;
 
-  process_args(argc, argv);
+  prepro.initialize();
 
-  process_files();
+  prepro.process_args(argc, argv);
 
-  terminate();
+  prepro.process_files();
+
+  prepro.terminate();
 
   return 0;
 }
 
-static void
+CPrePro::
+CPrePro()
+{
+  expr_ = new CExpr;
+
+  expr_->setQuiet(true);
+
+  expr_->addFunction("defined", "nis", new DefinedFunction(this));
+
+  context_stack_.clear();
+
+#ifdef CPRE_PRO_STD_DIRS
+  std::string paths_str = XSTR(CPRE_PRO_STD_DIRS);
+
+  std::vector<std::string> paths;
+
+  CStrUtil::addWords(paths_str, paths);
+
+  for (auto &path : paths)
+    add_include_dir(path, true);
+#endif
+}
+
+CPrePro::
+~CPrePro()
+{
+  delete expr_;
+}
+
+void
+CPrePro::
 initialize()
 {
-  expr = new CExpr;
-
-  expr->addFunction("defined", "nis", new DefinedFunction);
-
-  context_stack.clear();
-
   start_context(true);
 }
 
-static void
+void
+CPrePro::
 process_args(int argc, char **argv)
 {
   for (int i = 1; i < argc; i++) {
     if (argv[i][0] == '-') {
-      if (argv[i][1] != '\0') {
-        uint num_args_processed = process_option(&argv[i][1], argv[i + 1]);
-
-        i += num_args_processed - 1;
-      }
+      if (argv[i][1] != '\0')
+        process_option(&argv[i][1], i, argv);
     }
     else
       process_arg(argv[i]);
   }
 }
 
-static uint
-process_option(const std::string &option, const std::string &)
+void
+CPrePro::
+process_option(const std::string &option, int &argc, char **argv)
 {
-  uint num_args_processed = 1;
-
   if      (option[0] == 'D')
     add_define_option(option.substr(1));
   else if (option[0] == 'I')
     add_include_option(option.substr(1));
-  else if (option == "stdin")
-    add_file(NULL);
-  else if (option == "no_blank_lines")
-    no_blank_lines = true;
-  else if (option == "echo")
-    echo_input = true;
-  else if (option == "debug")
-    debug = true;
-  else
-    std::cerr << "Invalid Option " << option << std::endl;
+  else if (option[0] == 'o') {
+    ++argc;
 
-  return num_args_processed;
+    output_file_ = argv[argc];
+  }
+  else if (option == "stdin")
+    add_file(nullptr);
+  else if (option == "no_blank_lines")
+    no_blank_lines_ = true;
+  else if (option == "echo")
+    echo_input_ = true;
+  else if (option == "skip_std")
+    skip_std_ = true;
+  else if (option == "quiet")
+    quiet_ = true;
+  else if (option == "debug")
+    debug_ = true;
+  else if (option == "list_includes")
+    list_includes_ = true;
+  else
+    std::cerr << "Invalid Option " << option << "\n";
 }
 
-static void
+void
+CPrePro::
 add_define_option(const std::string &name)
 {
   std::string::size_type p = name.find('=');
@@ -215,45 +138,49 @@ add_define_option(const std::string &name)
     add_define(name, variables, "1");
 }
 
-static void
+void
+CPrePro::
 add_include_option(const std::string &str)
 {
   add_include_dir(str);
 }
 
-static void
+void
+CPrePro::
 process_arg(const std::string &arg)
 {
   add_file(arg);
 }
 
-static void
+void
+CPrePro::
 process_files()
 {
-  uint num_files = files.size();
+  int num_files = files_.size();
 
   if (num_files == 0)
     add_file("");
 
-  for (uint i = 0; i < num_files; i++)
-    process_file(files[i]);
+  for (int i = 0; i < num_files; i++)
+    process_file(files_[i]);
 }
 
-static void
+void
+CPrePro::
 process_file(const std::string &fileName)
 {
-  std::string save_current_file = current_file;
-  uint        save_current_line = current_line;
+  std::string save_current_file = current_file_;
+  uint        save_current_line = current_line_;
 
   if (fileName != "")
-    current_file = fileName;
+    current_file_ = fileName;
   else
-    current_file = "<stdin>";
+    current_file_ = "<stdin>";
 
-  current_line = 0;
+  current_line_ = 0;
 
-  if (debug)
-    std::cerr << "Processing file " << current_file << std::endl;
+  if (debug_)
+    std::cerr << "Processing file " << current_file_ << "\n";
 
   std::vector<std::string> lines;
 
@@ -270,16 +197,16 @@ process_file(const std::string &fileName)
 
   std::string line1 = "";
 
-  uint num_lines = lines.size();
+  int num_lines = lines.size();
 
-  for (uint i = 0; i < num_lines; ++i) {
+  for (int i = 0; i < num_lines; ++i) {
     std::string line1 = replace_trigraphs(lines[i]);
 
-    uint len = line1.size();
+    int len = line1.size();
 
     if (len > 0 && line1[len - 1] == '\\') {
-      if (echo_input)
-        std::cerr << line1 << std::endl;
+      if (echo_input_)
+        std::cerr << line1 << "\n";
 
       std::string line2 = line1.substr(0, len - 1);
 
@@ -290,8 +217,8 @@ process_file(const std::string &fileName)
       len = line1.size();
 
       while (i < num_lines && len > 0 && line1[len - 1] == '\\') {
-        if (echo_input)
-          std::cerr << line1 << std::endl;
+        if (echo_input_)
+          std::cerr << line1 << "\n";
 
         line2 += line1.substr(0, len - 1);
 
@@ -303,50 +230,51 @@ process_file(const std::string &fileName)
       }
 
       if (i < num_lines) {
-        if (echo_input)
-          std::cerr << line1 << std::endl;
+        if (echo_input_)
+          std::cerr << line1 << "\n";
 
         line2 += line1;
       }
       else
         i--;
 
-      current_line = i + 1;
+      current_line_ = i + 1;
 
-      if (! in_comment && line2[0] == '#')
+      if (! in_comment_ && line2[0] == '#')
         process_line(line2);
       else
         output_line(line2);
     }
     else {
-      current_line = i + 1;
+      current_line_ = i + 1;
 
-      if (echo_input)
-        std::cerr << line1 << std::endl;
+      if (echo_input_)
+        std::cerr << line1 << "\n";
 
-      if (! in_comment && line1[0] == '#')
+      if (! in_comment_ && line1[0] == '#')
         process_line(line1);
       else
         output_line(line1);
     }
   }
 
-  current_file = save_current_file;
-  current_line = save_current_line;
+  current_file_ = save_current_file;
+  current_line_ = save_current_line;
 }
 
-static void
+void
+CPrePro::
 process_line(const std::string &line)
 {
   static std::string command;
 
   std::string line1 = remove_comments(line, true);
 
-  uint pos = 1;
+  int pos = 1;
 
   CStrUtil::skipSpace(line1, &pos);
 
-  uint pos1 = pos;
+  int pos1 = pos;
 
   CStrUtil::skipNonSpace(line1, &pos);
 
@@ -358,7 +286,8 @@ process_line(const std::string &line)
     process_command(command, line1.substr(pos));
 }
 
-static void
+void
+CPrePro::
 process_command(const std::string &command, const std::string &data)
 {
   if      (command == "if"     )
@@ -381,105 +310,115 @@ process_command(const std::string &command, const std::string &data)
     process_include_command(data);
   else if (command == "error"  )
     process_error_command  (data);
+  else if (command == "warning")
+    process_warning_command(data);
   else if (command == "pragma" )
     ;
   else
     std::cerr << "Command '" << command << "' not supported - " <<
-            current_file << ":" << current_line << std::endl;
+                 current_file_ << ":" << current_line_ << "\n";
 }
 
-static void
+void
+CPrePro::
 process_if_command(const std::string &data)
 {
   start_context(false);
 
-  if (context->active)
-    context->processing = process_expression(data);
+  if (context_->active)
+    context_->processing = process_expression(data);
   else
-    context->processing = false;
+    context_->processing = false;
 
-  context->processed = context->processing;
+  context_->processed = context_->processing;
 }
 
-static void
+void
+CPrePro::
 process_ifdef_command(const std::string &data)
 {
   start_context(false);
 
-  if (context->active) {
+  if (context_->active) {
     Define *define = get_define(data);
 
-    context->processing = (define != NULL);
+    context_->processing = (define != nullptr);
   }
   else
-    context->processing = false;
+    context_->processing = false;
 
-  context->processed = context->processing;
+  context_->processed = context_->processing;
 }
 
-static void
+void
+CPrePro::
 process_ifndef_command(const std::string &data)
 {
   start_context(false);
 
-  if (context->active) {
+  if (context_->active) {
     Define *define = get_define(data);
 
-    context->processing = (define == NULL);
+    context_->processing = (define == nullptr);
   }
   else
-    context->processing = false;
+    context_->processing = false;
 
-  context->processed = context->processing;
+  context_->processed = context_->processing;
 }
 
-static void
+void
+CPrePro::
 process_else_command(const std::string &)
 {
-  if (context->active) {
-    context->processing = ! context->processed;
+  if (context_->active) {
+    context_->processing = ! context_->processed;
 
-    context->processed = true;
+    context_->processed = true;
   }
   else
-    context->processing = false;
+    context_->processing = false;
 }
 
-static void
+void
+CPrePro::
 process_elif_command(const std::string &data)
 {
-  if (context->active) {
+  if (context_->active) {
     bool flag = process_expression(data);
 
     if (flag)
-      context->processing = ! context->processed;
+      context_->processing = ! context_->processed;
 
-    if (context->processing)
-      context->processed = true;
+    if (context_->processing)
+      context_->processed = true;
   }
   else
-    context->processing = false;
+    context_->processing = false;
 }
 
-static void
+void
+CPrePro::
 process_endif_command(const std::string &)
 {
   if (! end_context())
-    std::cerr << "if/endif mismatch - " << current_file << ":" << current_line << std::endl;
+    std::cerr << "if/endif mismatch - " <<
+                 current_file_ << ":" << current_line_ << "\n";
 }
 
-static void
+void
+CPrePro::
 process_define_command(const std::string &data)
 {
-  if (! context->active || ! context->processing)
+  if (! context_->active || ! context_->processing)
     return;
 
-  uint pos = 0;
-  uint len = data.size();
+  int pos = 0;
+  int len = data.size();
 
   CStrUtil::skipSpace(data, &pos);
 
-  uint pos1 = pos;
+  int pos1 = pos;
 
   if (pos < len && (isalpha(data[pos]) || data[pos] == '_')) {
     ++pos;
@@ -490,7 +429,7 @@ process_define_command(const std::string &data)
 
   if (pos == pos1) {
     std::cerr << "Invalid define '" << data << "' - " <<
-                 current_file << ":" << current_line << std::endl;
+                 current_file_ << ":" << current_line_ << "\n";
     return;
   }
 
@@ -515,7 +454,7 @@ process_define_command(const std::string &data)
 
       if (pos == pos1) {
         std::cerr << "Invalid define '" << data << "' - " <<
-                     current_file << ":" << current_line << std::endl;
+                     current_file_ << ":" << current_line_ << "\n";
         return;
       }
 
@@ -541,7 +480,7 @@ process_define_command(const std::string &data)
 
         if (pos == pos1) {
           std::cerr << "Invalid define '" << data << "' - " <<
-                       current_file << ":" << current_line << std::endl;
+                       current_file_ << ":" << current_line_ << "\n";
           return;
         }
 
@@ -555,7 +494,7 @@ process_define_command(const std::string &data)
 
     if (pos >= len || data[pos] != ')') {
       std::cerr << "Invalid define '" << data << "' - " <<
-                   current_file << ":" << current_line << std::endl;
+                   current_file_ << ":" << current_line_ << "\n";
       return;
     }
 
@@ -572,17 +511,18 @@ process_define_command(const std::string &data)
   add_define(name, variables, value);
 }
 
-static void
+void
+CPrePro::
 process_undef_command(const std::string &data)
 {
-  if (! context->active || ! context->processing)
+  if (! context_->active || ! context_->processing)
     return;
 
-  uint pos = 0;
+  int pos = 0;
 
   CStrUtil::skipSpace(data, &pos);
 
-  uint pos1 = pos;
+  int pos1 = pos;
 
   CStrUtil::skipNonSpace(data, &pos);
 
@@ -591,111 +531,152 @@ process_undef_command(const std::string &data)
   remove_define(name);
 }
 
-static void
+void
+CPrePro::
 process_include_command(const std::string &data)
 {
-  if (! context->active || ! context->processing)
+  if (! context_->active || ! context_->processing)
     return;
 
-  uint len = data.size();
+  std::string data1 = replace_defines(data, true);
+
+  int len = data1.size();
 
   if (len < 2) {
     std::cerr << "Illegal include syntax - " <<
-                 current_file << ":" << current_line << std::endl;
+                 current_file_ << ":" << current_line_ << "\n";
     return;
   }
 
   char c;
 
-  if      (data[0] == '\"')
+  if      (data1[0] == '\"')
     c = '\"';
-  else if (data[0] == '<')
+  else if (data1[0] == '<')
     c = '>';
   else {
-    std::cerr << "Illegal include syntax - " << current_file << ":" << current_line << std::endl;
+    std::cerr << "Illegal include syntax - " <<
+                 current_file_ << ":" << current_line_ << "\n";
     return;
   }
 
-  uint i = 1;
+  int i = 1;
 
-  for (i = 1; i < len && data[i] != c; ++i)
+  for (i = 1; i < len && data1[i] != c; ++i)
     ;
 
-  std::string fileName = data.substr(1, i - 1);
+  std::string fileName = data1.substr(1, i - 1);
 
-  const std::string include_file = get_include_file(fileName);
+  bool std = false;
 
-  if (include_file != "")
-    process_file(include_file);
-  else
-    std::cerr << "Failed to find include file '" << fileName << "' -" <<
-                 current_file << ":" << current_line << std::endl;
-}
+  const std::string include_file = get_include_file(fileName, std);
 
-static void
-process_error_command(const std::string &data)
-{
-  if (! context->active || ! context->processing)
+  if (include_file == "") {
+    std::cerr << "Failed to find include file '" << fileName << "' - " <<
+                 current_file_ << ":" << current_line_ << "\n";
+    return;
+  }
+
+  if (std && skip_std_)
     return;
 
-  std::cerr << data << " - " << current_file << ":" << current_line << std::endl;
+  Include *include = new Include(include_file);
+
+  if (! current_include_)
+    current_include_ = new Include("");
+
+  current_include_->includes.push_back(include);
+
+  std::swap(current_include_, include);
+
+  process_file(current_include_->filename);
+
+  std::swap(current_include_, include);
 }
 
-static int
+void
+CPrePro::
+process_error_command(const std::string &data)
+{
+  if (! context_->active || ! context_->processing)
+    return;
+
+  std::cerr << data << " - " << current_file_ << ":" << current_line_ << "\n";
+}
+
+void
+CPrePro::
+process_warning_command(const std::string &data)
+{
+  if (! context_->active || ! context_->processing)
+    return;
+
+  std::cerr << data << " - " << current_file_ << ":" << current_line_ << "\n";
+}
+
+int
+CPrePro::
 process_expression(const std::string &expression)
 {
   std::string expression1 = replace_defines(expression, true);
 
   CExprValuePtr value;
 
-  if (! expr->evaluateExpression(expression1, value))
+  if (! expr_->evaluateExpression(expression1, value))
     return false;
 
   long integer;
 
-  if (! value->getIntegerValue(integer))
+  if (! value.isValid() || ! value->getIntegerValue(integer))
     return false;
 
   return (integer != 0);
 }
 
-static void
+void
+CPrePro::
 output_line(const std::string &line)
 {
-  if (! context->active || ! context->processing)
+  if (! context_->active || ! context_->processing)
+    return;
+
+  if (quiet_)
     return;
 
   std::string line1 = remove_comments(line, false);
 
   std::string line2 = replace_defines(line1, false);
 
-  if (no_blank_lines) {
-    uint len = line2.size();
-    uint pos = 0;
+  if (no_blank_lines_) {
+    int len = line2.size();
+    int pos = 0;
 
     CStrUtil::skipSpace(line2, &pos);
 
     if (pos >= len) return;
   }
 
-  std::cout << line2 << std::endl;
+  std::cout << line2 << "\n";
 }
 
-static std::string
+std::string
+CPrePro::
 replace_trigraphs(const std::string &line)
 {
+  static const char trigraph_chars1[] = "=/\'()!<>-";
+  static const char trigraph_chars2[] = "#\\^[]|{}~";
+
   std::string line1;
 
-  uint len = line.size();
+  int len = line.size();
 
-  uint j = 0;
+  int j = 0;
 
   for (int i = 0; i < int(len) - 2; ++i) {
     if (line[i] != '?' || line[i + 1] != '?') continue;
 
     const char *p = strchr(trigraph_chars1, line[i + 2]);
-
-    if (p == NULL) continue;
+    if (! p) continue;
 
     line1 += line.substr(j, i - j);
     line1 += trigraph_chars2[p - trigraph_chars1];
@@ -710,7 +691,8 @@ replace_trigraphs(const std::string &line)
   return line1;
 }
 
-static std::string
+std::string
+CPrePro::
 remove_comments(const std::string &line, bool preprocessor_line)
 {
   bool in_comment1;
@@ -718,12 +700,12 @@ remove_comments(const std::string &line, bool preprocessor_line)
   if (preprocessor_line)
     in_comment1 = false;
   else
-    in_comment1 = in_comment;
+    in_comment1 = in_comment_;
 
   std::string line1;
 
-  uint pos = 0;
-  uint len = line.size();
+  int pos = 0;
+  int len = line.size();
 
   while (pos < len) {
     if      (! in_comment1 && line[pos] == '/' && line[pos + 1] == '*') {
@@ -736,6 +718,11 @@ remove_comments(const std::string &line, bool preprocessor_line)
 
       pos += 2;
     }
+#ifdef CPP_SUPPORT
+    else if (! in_comment1 && line[pos] == '/' && line[pos + 1] == '/') {
+      break;
+    }
+#endif
     else {
       if (! in_comment1)
         line1 += line[pos];
@@ -745,14 +732,15 @@ remove_comments(const std::string &line, bool preprocessor_line)
   }
 
   if (preprocessor_line)
-    in_comment = false;
+    in_comment_ = false;
   else
-    in_comment = in_comment1;
+    in_comment_ = in_comment1;
 
   return line1;
 }
 
-static std::string
+std::string
+CPrePro::
 replace_defines(const std::string &tline, bool preprocessor_line)
 {
   if (tline.empty()) return tline;
@@ -764,7 +752,8 @@ replace_defines(const std::string &tline, bool preprocessor_line)
   return replace_defines(tline, preprocessor_line, data);
 }
 
-static std::string
+std::string
+CPrePro::
 replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineData &data)
 {
   std::string line = tline;
@@ -772,10 +761,8 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
   if (data.in_replace_defines > 0) {
     DefineList used_defines2;
 
-    DefineList::const_iterator pd1, pd2;
-
-    for (pd1 = used_defines2.begin(), pd2 = used_defines2.end(); pd1 != pd2; ++pd1)
-      used_defines2.push_back(*pd1);
+    for (const auto &pd : used_defines2)
+      used_defines2.push_back(pd);
 
     data.used_defines_list.push_back(used_defines2);
   }
@@ -789,24 +776,24 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
 
   DefineList used_defines1;
 
-  uint num_replaced = 0;
+  int num_replaced = 0;
 
   ++data.in_replace_defines;
 
-  while (data.in_replace_defines > data.lines1.size())
+  while (data.in_replace_defines > int(data.lines1.size()))
     data.lines1.push_back(new std::string);
 
-  uint iline1 = data.in_replace_defines - 1;
+  int iline1 = data.in_replace_defines - 1;
 
   *data.lines1[iline1] = "";
 
   ArgList args;
 
-  uint pos = 0;
-  uint len = line.size();
+  int pos = 0;
+  int len = line.size();
 
   while (pos < len) {
-    uint pos1 = pos;
+    int pos1 = pos;
 
     bool in_string1 = false;
     bool in_string2 = false;
@@ -872,7 +859,7 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
 
       Define *define = get_define(identifier);
 
-      if (define != NULL)
+      if (define)
         *data.lines1[iline1] += "1";
       else
         *data.lines1[iline1] += "0";
@@ -882,7 +869,7 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
 
     Define *define = get_define(identifier);
 
-    if (define == NULL) {
+    if (! define) {
       *data.lines1[iline1] += identifier;
 
       continue;
@@ -924,7 +911,7 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
 
     args.clear();
 
-    uint pos2 = pos;
+    int pos2 = pos;
 
     ++pos;
 
@@ -995,9 +982,9 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
 
     //------
 
-    uint num_args = args.size();
+    int num_args = args.size();
 
-    uint num_variables = define->variables.size();
+    int num_variables = define->variables.size();
 
     if (num_args != num_variables) {
       args.clear();
@@ -1012,7 +999,7 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
     bool hash_hash_before = false;
     bool hash_hash_after  = false;
 
-    uint len1 = define->value.size();
+    int len1 = define->value.size();
 
     pos1 = 0;
 
@@ -1023,7 +1010,7 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
 
       hash_hash_before = false;
 
-      uint pos3;
+      int pos3;
 
       while (pos1 < len1) {
         hash_before      = false;
@@ -1072,7 +1059,7 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
 
       std::string identifier = define->value.substr(pos2, pos1 - pos2);
 
-      uint i = 0;
+      int i = 0;
 
       for (i = 0; i < num_variables; i++)
         if (define->variables[i] == identifier)
@@ -1134,10 +1121,8 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
   std::string line2;
 
   if (num_replaced > 0) {
-    DefineList::const_iterator pd1, pd2;
-
-    for (pd1 = used_defines1.begin(), pd2 = used_defines1.end(); pd1 != pd2; ++pd1)
-      data.used_defines.push_back(*pd1);
+    for (const auto &pd : used_defines1)
+      data.used_defines.push_back(pd);
 
     line2 = replace_defines(*data.lines1[iline1], false, data);
   }
@@ -1158,19 +1143,20 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
   return line2;
 }
 
-static std::string
+std::string
+CPrePro::
 replace_hash_hash(const std::string &tline)
 {
   std::string line = tline;
 
   std::string line1;
 
-  uint len = line.size();
+  int len = line.size();
 
-  uint i = 0;
+  int i = 0;
 
   while (i < len) {
-    uint i1 = i;
+    int i1 = i;
 
     CStrUtil::skipSpace(line, &i1);
 
@@ -1191,16 +1177,18 @@ replace_hash_hash(const std::string &tline)
   return line1;
 }
 
-static void
+void
+CPrePro::
 add_file(const std::string &fileName)
 {
-  files.push_back(fileName);
+  files_.push_back(fileName);
 }
 
-static void
+void
+CPrePro::
 add_define(const std::string &name, const VariableList &variables, const std::string &value)
 {
-  if (debug) {
+  if (debug_) {
     if (! variables.empty()) {
       std::cerr << "Add Define " << name << "(";
 
@@ -1213,22 +1201,18 @@ add_define(const std::string &name, const VariableList &variables, const std::st
         std::cerr << variables[i];
       }
 
-      std::cerr << ")=" << value << std::endl;
+      std::cerr << ")=" << value << "\n";
     }
     else
-      std::cerr << "Add Define " << name << "=" << value << std::endl;
+      std::cerr << "Add Define " << name << "=" << value << "\n";
   }
 
   Define *define = get_define(name);
 
-  if (define == NULL) {
-    define = new Define;
+  if (! define) {
+    define = new Define(name, variables, value);
 
-    define->name      = name;
-    define->variables = variables;
-    define->value     = value;
-
-    defines.push_back(define);
+    defines_.push_back(define);
 
     return;
   }
@@ -1242,9 +1226,9 @@ add_define(const std::string &name, const VariableList &variables, const std::st
     redefined = true;
 
   if (! redefined && ! define->variables.empty()) {
-    uint num_variables = define->variables.size();
+    int num_variables = define->variables.size();
 
-    for (uint i = 0; i < num_variables; i++) {
+    for (int i = 0; i < num_variables; i++) {
       if (define->variables[i] != variables[i]) {
         redefined = true;
         break;
@@ -1253,55 +1237,68 @@ add_define(const std::string &name, const VariableList &variables, const std::st
   }
 
   if (redefined)
-    std::cerr << "Redefinition of " << name << " from " << define->value <<
-                 " to " << value << " - " << current_file << ":" <<
-                 current_line << std::endl;
+    std::cerr << "Redefinition of " << name << " from " << define->value << " to " << value <<
+                 " - " << current_file_ << ":" << current_line_ << "\n";
 
   define->variables = variables;
   define->value     = value;
 }
 
-static void
+void
+CPrePro::
 remove_define(const std::string &name)
 {
   Define *define = get_define(name);
 
-  if (define == NULL)
+  if (! define)
     return;
 
-  defines.remove(define);
+  defines_.remove(define);
 
   delete define;
 }
 
-static Define *
+CPrePro::Define *
+CPrePro::
 get_define(const std::string &name)
 {
-  DefineList::const_iterator pd1, pd2;
+  for (const auto &pd : defines_)
+    if (pd->name == name)
+      return pd;
 
-  for (pd1 = defines.begin(), pd2 = defines.end(); pd1 != pd2; ++pd1)
-    if ((*pd1)->name == name)
-      return *pd1;
-
-  return NULL;
+  return nullptr;
 }
 
-static void
-add_include_dir(const std::string &dirName)
+void
+CPrePro::
+add_include_dir(const std::string &dirName, bool std)
 {
-  include_dirs.push_back(dirName);
+  if (std)
+    std_include_dirs_.push_back(dirName);
+  else
+    include_dirs_.push_back(dirName);
 }
 
-static std::string
-get_include_file(const std::string &fileName)
+std::string
+CPrePro::
+get_include_file(const std::string &fileName, bool &std)
 {
+  std = false;
+
   if (CFile::exists(fileName))
     return fileName;
 
-  uint num_include_dirs = include_dirs.size();
+  for (const auto &dir : include_dirs_) {
+    std::string fileName1 = dir + "/" + fileName;
 
-  for (uint i = 0; i < num_include_dirs; ++i) {
-    std::string fileName1 = include_dirs[i] + "/" + fileName;
+    if (CFile::exists(fileName1))
+      return fileName1;
+  }
+
+  std = true;
+
+  for (const auto &dir : std_include_dirs_) {
+    std::string fileName1 = dir + "/" + fileName;
 
     if (CFile::exists(fileName1))
       return fileName1;
@@ -1315,68 +1312,75 @@ get_include_file(const std::string &fileName)
   return "";
 }
 
-static void
+void
+CPrePro::
 start_context(bool processing)
 {
-  Context *old_context = context;
+  Context *old_context = context_;
 
-  if (old_context != NULL)
-    context_stack.push_back(old_context);
+  if (old_context)
+    context_stack_.push_back(old_context);
 
-  context = new Context;
+  context_ = new Context;
 
-  if (old_context != NULL)
-    context->active = old_context->processing;
+  if (old_context)
+    context_->active = old_context->processing;
   else
-    context->active = true;
+    context_->active = true;
 
-  context->processing = processing;
-  context->processed  = processing;
+  context_->processing = processing;
+  context_->processed  = processing;
 }
 
-static bool
+bool
+CPrePro::
 end_context()
 {
   bool flag = true;
 
-  delete context;
+  delete context_;
 
-  if (! context_stack.empty()) {
-    context = context_stack.back();
+  if (! context_stack_.empty()) {
+    context_ = context_stack_.back();
 
-    context_stack.pop_back();
+    context_stack_.pop_back();
   }
   else
     flag = false;
 
-  if (context == NULL) {
-    context = new Context;
+  if (! context_) {
+    context_ = new Context;
 
-    context->active     = true;
-    context->processed  = false;
-    context->processing = true;
+    context_->active     = true;
+    context_->processed  = false;
+    context_->processing = true;
   }
 
   return flag;
 }
 
-static CExprValuePtr
-defined_proc(const CExprValuePtr *values, uint)
+CExprValuePtr
+CPrePro::
+defined_proc(const CExprValuePtr *values, int)
 {
   CExprValuePtr value;
 
   long integer;
 
   if (values[0].isValid() && values[0]->getIntegerValue(integer))
-    value = expr->createIntegerValue(integer);
+    value = expr_->createIntegerValue(integer);
   else
-    value = expr->createIntegerValue(0);
+    value = expr_->createIntegerValue(0);
 
   return value;
 }
 
-static void
+void
+CPrePro::
 terminate()
 {
-  exit(0);
+  if (list_includes_) {
+    if (current_include_)
+      current_include_->print();
+  }
 }
