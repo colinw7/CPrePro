@@ -17,6 +17,12 @@ CPrePro.cpp \
 
 OBJS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(SRC))
 
+CPRE_PRO_STD_DIRS = \
+/usr/include/c++/8 \
+/usr/include/x86_64-linux-gnu/c++/8 \
+/usr/lib/gcc/x86_64-linux-gnu/8/include \
+/usr/include/x86_64-linux-gnu \
+
 CPPFLAGS = \
 -std=c++14 \
 -I$(INC_DIR) \
