@@ -5,6 +5,8 @@
 #include <vector>
 #include <list>
 #include <string>
+#include <iostream>
+#include <fstream>
 
 class CPrePro {
  public:
@@ -35,14 +37,14 @@ class CPrePro {
      filename(filename) {
     }
 
-    void print(int depth=0) {
+    void print(std::ostream &os, int depth=0) {
       for (int i = 0; i < depth; ++i)
-        std::cerr << " ";
+        os << " ";
 
-      std::cerr << filename << "\n";
+      os << filename << "\n";
 
       for (const auto &i : includes)
-        i->print(depth + 1);
+        i->print(os, depth + 1);
     }
 
     std::string filename;
@@ -122,25 +124,28 @@ class CPrePro {
   CExprValuePtr defined_proc(const CExprValuePtr *values, int num_values);
 
  private:
-  FileList     files_;
-  DefineList   defines_;
-  DirList      include_dirs_;
-  DirList      std_include_dirs_;
-  Context*     context_         { nullptr };
-  ContextStack context_stack_;
-  bool         no_blank_lines_  { false };
-  bool         echo_input_      { false };
-  bool         skip_std_        { false };
-  bool         quiet_           { false };
-  bool         debug_           { false };
-  bool         list_includes_   { false };
-  std::string  current_file_    { "None" };
-  int          current_line_    { 0 };
-  bool         in_comment_      { false };
-  CExpr*       expr_            { nullptr };
-  Includes     includes_;
-  Include*     current_include_ { nullptr };
-  std::string  output_file_;
+  FileList      files_;
+  DefineList    defines_;
+  DirList       include_dirs_;
+  DirList       std_include_dirs_;
+  Context*      context_         { nullptr };
+  ContextStack  context_stack_;
+  bool          no_blank_lines_  { false };
+  bool          echo_input_      { false };
+  bool          no_std_          { false };
+  bool          quiet_           { false };
+  bool          warn_            { true };
+  bool          debug_           { false };
+  bool          list_includes_   { false };
+  std::string   current_file_    { "None" };
+  int           current_line_    { 0 };
+  bool          in_comment_      { false };
+  CExpr*        expr_            { nullptr };
+  Includes      includes_;
+  Include*      current_include_ { nullptr };
+  std::string   output_file_;
+  std::ofstream output_fstream_;
+  std::ostream* output_stream_   { nullptr };
 };
 
 #endif

@@ -42,6 +42,8 @@ main(int argc, char **argv)
 CPrePro::
 CPrePro()
 {
+  output_stream_ = &std::cout;
+
   expr_ = new CExpr;
 
   expr_->setQuiet(true);
@@ -101,6 +103,10 @@ process_option(const std::string &option, int &argc, char **argv)
     ++argc;
 
     output_file_ = argv[argc];
+
+    output_fstream_ = std::ofstream(output_file_, std::ofstream::out);
+
+    output_stream_ = &output_fstream_;
   }
   else if (option == "stdin")
     add_file(nullptr);
@@ -108,10 +114,12 @@ process_option(const std::string &option, int &argc, char **argv)
     no_blank_lines_ = true;
   else if (option == "echo")
     echo_input_ = true;
-  else if (option == "skip_std")
-    skip_std_ = true;
+  else if (option == "nostd" || option == "no_std")
+    no_std_ = true;
   else if (option == "quiet")
     quiet_ = true;
+  else if (option == "nowarn" || option == "no_warn")
+    warn_ = false;
   else if (option == "debug")
     debug_ = true;
   else if (option == "list_includes")
@@ -572,12 +580,13 @@ process_include_command(const std::string &data)
   const std::string include_file = get_include_file(fileName, std);
 
   if (include_file == "") {
-    std::cerr << "Failed to find include file '" << fileName << "' - " <<
-                 current_file_ << ":" << current_line_ << "\n";
+    if (warn_)
+      std::cerr << "Failed to find include file '" << fileName << "' - " <<
+                   current_file_ << ":" << current_line_ << "\n";
     return;
   }
 
-  if (std && skip_std_)
+  if (std && no_std_)
     return;
 
   Include *include = new Include(include_file);
@@ -656,7 +665,7 @@ output_line(const std::string &line)
     if (pos >= len) return;
   }
 
-  std::cout << line2 << "\n";
+  (*output_stream_) << line2 << "\n";
 }
 
 std::string
@@ -1381,6 +1390,6 @@ terminate()
 {
   if (list_includes_) {
     if (current_include_)
-      current_include_->print();
+      current_include_->print(std::cout);
   }
 }
