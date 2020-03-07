@@ -208,61 +208,61 @@ process_file(const std::string &fileName)
   int num_lines = lines.size();
 
   for (int i = 0; i < num_lines; ++i) {
-    std::string line1 = replace_trigraphs(lines[i]);
+    std::string line2 = replace_trigraphs(lines[i]);
 
-    int len = line1.size();
+    int len = line2.size();
 
-    if (len > 0 && line1[len - 1] == '\\') {
+    if (len > 0 && line2[len - 1] == '\\') {
       if (echo_input_)
-        std::cerr << line1 << "\n";
+        std::cerr << line2 << "\n";
 
-      std::string line2 = line1.substr(0, len - 1);
+      std::string line3 = line2.substr(0, len - 1);
 
       ++i;
 
-      line1 = replace_trigraphs(lines[i]);
+      line2 = replace_trigraphs(lines[i]);
 
-      len = line1.size();
+      len = line2.size();
 
-      while (i < num_lines && len > 0 && line1[len - 1] == '\\') {
+      while (i < num_lines && len > 0 && line2[len - 1] == '\\') {
         if (echo_input_)
-          std::cerr << line1 << "\n";
+          std::cerr << line2 << "\n";
 
-        line2 += line1.substr(0, len - 1);
+        line3 += line2.substr(0, len - 1);
 
         ++i;
 
-        line1 = replace_trigraphs(lines[i]);
+        line2 = replace_trigraphs(lines[i]);
 
-        len = line1.size();
+        len = line2.size();
       }
 
       if (i < num_lines) {
         if (echo_input_)
-          std::cerr << line1 << "\n";
+          std::cerr << line2 << "\n";
 
-        line2 += line1;
+        line3 += line2;
       }
       else
         i--;
 
       current_line_ = i + 1;
 
-      if (! in_comment_ && line2[0] == '#')
-        process_line(line2);
+      if (! in_comment_ && line3[0] == '#')
+        process_line(line3);
       else
-        output_line(line2);
+        output_line(line3);
     }
     else {
       current_line_ = i + 1;
 
       if (echo_input_)
-        std::cerr << line1 << "\n";
+        std::cerr << line2 << "\n";
 
-      if (! in_comment_ && line1[0] == '#')
-        process_line(line1);
+      if (! in_comment_ && line2[0] == '#')
+        process_line(line2);
       else
-        output_line(line1);
+        output_line(line2);
     }
   }
 
@@ -492,9 +492,9 @@ process_define_command(const std::string &data)
           return;
         }
 
-        std::string variable = data.substr(pos1, pos - pos1);
+        std::string variable1 = data.substr(pos1, pos - pos1);
 
-        variables.push_back(variable);
+        variables.push_back(variable1);
 
         CStrUtil::skipSpace(data, &pos);
       }
@@ -861,12 +861,12 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
       while (pos < len && line[pos] != ')')
         ++pos;
 
-      std::string identifier = line.substr(pos1, pos - pos1);
+      std::string identifier1 = line.substr(pos1, pos - pos1);
 
       if (pos < len && line[pos] == ')')
         ++pos;
 
-      Define *define = get_define(identifier);
+      Define *define = get_define(identifier1);
 
       if (define)
         *data.lines1[iline1] += "1";
@@ -930,11 +930,11 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
       pos1 = pos;
 
       int  brackets   = 0;
-      bool in_string1 = false;
-      bool in_string2 = false;
+      bool in_string3 = false;
+      bool in_string4 = false;
 
       while (pos < len) {
-        if (! in_string1 && ! in_string2) {
+        if (! in_string3 && ! in_string4) {
           if      (line[pos] == '(')
             ++brackets;
           else if (line[pos] == ')') {
@@ -948,25 +948,25 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
               break;
           }
           else if (line[pos] == '\'')
-            in_string1 = ! in_string1;
+            in_string3 = ! in_string3;
           else if (line[pos] == '\"')
-            in_string2 = ! in_string2;
+            in_string4 = ! in_string4;
         }
-        else if (in_string1) {
+        else if (in_string3) {
           if      (line[pos] == '\\') {
             if (pos < len - 1)
               ++pos;
           }
           else if (line[pos] == '\'')
-            in_string1 = ! in_string1;
+            in_string3 = ! in_string3;
         }
-        else if (in_string2) {
+        else if (in_string4) {
           if      (line[pos] == '\\') {
             if (pos < len - 1)
               ++pos;
           }
           else if (line[pos] == '\"')
-            in_string2 = ! in_string2;
+            in_string4 = ! in_string4;
         }
 
         ++pos;
@@ -1066,12 +1066,12 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
       while (pos < len1 && (isalnum(define->value[pos1]) || define->value[pos1] == '_'))
         ++pos1;
 
-      std::string identifier = define->value.substr(pos2, pos1 - pos2);
+      std::string identifier1 = define->value.substr(pos2, pos1 - pos2);
 
       int i = 0;
 
       for (i = 0; i < num_variables; i++)
-        if (define->variables[i] == identifier)
+        if (define->variables[i] == identifier1)
           break;
 
       if (i >= num_variables) {
