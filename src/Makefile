@@ -24,7 +24,7 @@ CPRE_PRO_STD_DIRS = \
 /usr/include/x86_64-linux-gnu \
 
 CPPFLAGS = \
--std=c++14 \
+-std=c++17 \
 -I$(INC_DIR) \
 -I. \
 -I../../CExpr/include \
