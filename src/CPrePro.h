@@ -23,8 +23,8 @@ class CPrePro {
     VariableList variables;
     std::string  value;
 
-    Define(const std::string &name, const VariableList &variables, const std::string &value) :
-     name(name), variables(variables), value(value) {
+    Define(const std::string &name_, const VariableList &variables_, const std::string &value_) :
+     name(name_), variables(variables_), value(value_) {
     }
   };
 
@@ -33,8 +33,8 @@ class CPrePro {
   using Includes = std::vector<Include *>;
 
   struct Include {
-    Include(const std::string &filename) :
-     filename(filename) {
+    Include(const std::string &filename_) :
+     filename(filename_) {
     }
 
     void print(std::ostream &os, int depth=0) {

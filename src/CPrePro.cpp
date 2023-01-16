@@ -15,8 +15,8 @@ class DefinedFunction : public CExprFunctionObj {
    prepro_(prepro) {
   }
 
-  CExprValuePtr operator()(CExpr *, const CExprValueArray &values) {
-    return prepro_->defined_proc(&values[0], values.size());
+  CExprValuePtr operator()(CExpr *, const CExprValueArray &values) override {
+    return prepro_->defined_proc(&values[0], int(values.size()));
   }
 
  private:
@@ -164,7 +164,7 @@ void
 CPrePro::
 process_files()
 {
-  int num_files = files_.size();
+  int num_files = int(files_.size());
 
   if (num_files == 0)
     add_file("");
@@ -205,12 +205,12 @@ process_file(const std::string &fileName)
 
   std::string line1 = "";
 
-  int num_lines = lines.size();
+  int num_lines = int(lines.size());
 
   for (int i = 0; i < num_lines; ++i) {
     std::string line2 = replace_trigraphs(lines[i]);
 
-    int len = line2.size();
+    int len = int(line2.size());
 
     if (len > 0 && line2[len - 1] == '\\') {
       if (echo_input_)
@@ -222,7 +222,7 @@ process_file(const std::string &fileName)
 
       line2 = replace_trigraphs(lines[i]);
 
-      len = line2.size();
+      len = int(line2.size());
 
       while (i < num_lines && len > 0 && line2[len - 1] == '\\') {
         if (echo_input_)
@@ -234,7 +234,7 @@ process_file(const std::string &fileName)
 
         line2 = replace_trigraphs(lines[i]);
 
-        len = line2.size();
+        len = int(line2.size());
       }
 
       if (i < num_lines) {
@@ -422,7 +422,7 @@ process_define_command(const std::string &data)
     return;
 
   int pos = 0;
-  int len = data.size();
+  int len = int(data.size());
 
   CStrUtil::skipSpace(data, &pos);
 
@@ -548,7 +548,7 @@ process_include_command(const std::string &data)
 
   std::string data1 = replace_defines(data, true);
 
-  int len = data1.size();
+  int len = int(data1.size());
 
   if (len < 2) {
     std::cerr << "Illegal include syntax - " <<
@@ -636,7 +636,7 @@ process_expression(const std::string &expression)
 
   long integer;
 
-  if (! value.isValid() || ! value->getIntegerValue(integer))
+  if (! value || ! value->getIntegerValue(integer))
     return false;
 
   return (integer != 0);
@@ -657,7 +657,7 @@ output_line(const std::string &line)
   std::string line2 = replace_defines(line1, false);
 
   if (no_blank_lines_) {
-    int len = line2.size();
+    int len = int(line2.size());
     int pos = 0;
 
     CStrUtil::skipSpace(line2, &pos);
@@ -677,7 +677,7 @@ replace_trigraphs(const std::string &line)
 
   std::string line1;
 
-  int len = line.size();
+  int len = int(line.size());
 
   int j = 0;
 
@@ -714,7 +714,7 @@ remove_comments(const std::string &line, bool preprocessor_line)
   std::string line1;
 
   int pos = 0;
-  int len = line.size();
+  int len = int(line.size());
 
   while (pos < len) {
     if      (! in_comment1 && line[pos] == '/' && line[pos + 1] == '*') {
@@ -799,7 +799,7 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
   ArgList args;
 
   int pos = 0;
-  int len = line.size();
+  int len = int(line.size());
 
   while (pos < len) {
     int pos1 = pos;
@@ -991,9 +991,9 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
 
     //------
 
-    int num_args = args.size();
+    int num_args = int(args.size());
 
-    int num_variables = define->variables.size();
+    int num_variables = int(define->variables.size());
 
     if (num_args != num_variables) {
       args.clear();
@@ -1008,7 +1008,7 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
     bool hash_hash_before = false;
     bool hash_hash_after  = false;
 
-    int len1 = define->value.size();
+    int len1 = int(define->value.size());
 
     pos1 = 0;
 
@@ -1093,7 +1093,7 @@ replace_defines(const std::string &tline, bool preprocessor_line, ReplaceDefineD
         *data.lines1[iline1] += "\"";
 
         pos2 = 0;
-        len1 = args[i].size();
+        len1 = int(args[i].size());
 
         while (pos2 < len1) {
           if (args[i][pos2] == '"' || args[i][pos2] == '\\')
@@ -1160,7 +1160,7 @@ replace_hash_hash(const std::string &tline)
 
   std::string line1;
 
-  int len = line.size();
+  int len = int(line.size());
 
   int i = 0;
 
@@ -1201,7 +1201,7 @@ add_define(const std::string &name, const VariableList &variables, const std::st
     if (! variables.empty()) {
       std::cerr << "Add Define " << name << "(";
 
-      int num_variables = variables.size();
+      int num_variables = int(variables.size());
 
       for (int i = 0; i < num_variables; i++) {
         if (i > 0)
@@ -1235,7 +1235,7 @@ add_define(const std::string &name, const VariableList &variables, const std::st
     redefined = true;
 
   if (! redefined && ! define->variables.empty()) {
-    int num_variables = define->variables.size();
+    int num_variables = int(define->variables.size());
 
     for (int i = 0; i < num_variables; i++) {
       if (define->variables[i] != variables[i]) {
@@ -1376,7 +1376,7 @@ defined_proc(const CExprValuePtr *values, int)
 
   long integer;
 
-  if (values[0].isValid() && values[0]->getIntegerValue(integer))
+  if (values[0] && values[0]->getIntegerValue(integer))
     value = expr_->createIntegerValue(integer);
   else
     value = expr_->createIntegerValue(0);
